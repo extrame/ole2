@@ -32,14 +32,14 @@ func (r *StreamReader) Read(p []byte) (n int, err error) {
 		}
 		pos := r.ole.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
 		p[i] = r.ole.bts[pos]
-		if DEBUG {
-			log.Printf("pos:%x,bit:%x", pos, p[i])
-		}
 		r.offset_in_sector++
 		r.offset++
 		if r.offset == int64(r.size) {
 			return i + 1, io.EOF
 		}
+	}
+	if DEBUG {
+		log.Printf("pos:%x,bit:% X", r.offset_of_sector, p)
 	}
 	return len(p), nil
 }

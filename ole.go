@@ -45,7 +45,9 @@ func (o *Ole) ListDir() (dir []*File, err error) {
 		} else {
 			break
 		}
-
+	}
+	if err == io.EOF && dir != nil {
+		return dir, nil
 	}
 
 	return
