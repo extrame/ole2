@@ -15,20 +15,21 @@ type Ole struct {
 	SecID    []uint32
 	SSecID   []uint32
 	Files    []File
-	bts      []byte
+	reader   io.ReadSeeker
 }
 
-func Open(bts []byte, charset string) (ole *Ole, err error) {
+func Open(reader io.ReadSeeker, charset string) (ole *Ole, err error) {
 	var header *Header
-	if header, err = parseHeader(bts[:512]); err == nil {
+	var hbts = make([]byte, 512)
+	reader.Read(hbts)
+	if header, err = parseHeader(hbts); err == nil {
 		ole = new(Ole)
-		ole.bts = bts
+		ole.reader = reader
 		ole.header = header
 		ole.Lsector = 512 //TODO
 		ole.Lssector = 64 //TODO
-		ole.bts = bts
-		ole.readMSAT()
-		return ole, nil
+		err = ole.readMSAT()
+		return ole, err
 	}
 
 	return nil, err
@@ -62,7 +63,7 @@ func (o *Ole) OpenFile(file *File) io.ReadSeeker {
 }
 
 // Read MSAT
-func (o *Ole) readMSAT() {
+func (o *Ole) readMSAT() error {
 	// int sectorNum;
 
 	count := uint32(109)
@@ -71,39 +72,50 @@ func (o *Ole) readMSAT() {
 	}
 
 	for i := uint32(0); i < count; i++ {
-		sector := o.sector_read(o.header.Msat[i])
-		sids := sector.AllValues(o.Lsector)
-
-		o.SecID = append(o.SecID, sids...)
+		if sector, err := o.sector_read(o.header.Msat[i]); err == nil {
+			sids := sector.AllValues(o.Lsector)
+			o.SecID = append(o.SecID, sids...)
+		} else {
+			return err
+		}
 	}
 
 	for sid := o.header.Difstart; sid != ENDOFCHAIN; {
-		sector := o.sector_read(sid)
-		sids := sector.MsatValues(o.Lsector)
+		if sector, err := o.sector_read(sid); err == nil {
+			sids := sector.MsatValues(o.Lsector)
 
-		for _, sid := range sids {
-			sector := o.sector_read(sid)
-			sids := sector.AllValues(o.Lsector)
+			for _, sid := range sids {
+				if sector, err := o.sector_read(sid); err == nil {
+					sids := sector.AllValues(o.Lsector)
 
-			o.SecID = append(o.SecID, sids...)
+					o.SecID = append(o.SecID, sids...)
+				} else {
+					return err
+				}
+			}
+
+			sid = sector.NextSid(o.Lsector)
+		} else {
+			return err
 		}
-
-		sid = sector.NextSid(o.Lsector)
 	}
 
 	for i := uint32(0); i < o.header.Csfat; i++ {
 		sid := o.header.Sfatstart
 
 		if sid != ENDOFCHAIN {
-			sector := o.sector_read(sid)
+			if sector, err := o.sector_read(sid); err == nil {
+				sids := sector.MsatValues(o.Lsector)
 
-			sids := sector.MsatValues(o.Lsector)
+				o.SSecID = append(o.SSecID, sids...)
 
-			o.SSecID = append(o.SSecID, sids...)
-
-			sid = sector.NextSid(o.Lsector)
+				sid = sector.NextSid(o.Lsector)
+			} else {
+				return err
+			}
 		}
 	}
+	return nil
 
 }
 
@@ -115,15 +127,23 @@ func (o *Ole) short_stream_read(sid uint32, size uint32) *StreamReader {
 	return &StreamReader{o.SSecID, sid, o, sid, 0, o.Lssector, int64(size), 0}
 }
 
-func (o *Ole) sector_read(sid uint32) Sector {
-	pos := o.sector_pos(sid, o.Lsector)
-	bts := o.bts[pos : pos+o.Lsector]
-	return Sector(bts)
+func (o *Ole) sector_read(sid uint32) (Sector, error) {
+	return o.sector_read_internal(sid, o.Lsector)
 }
 
-func (o *Ole) short_sector_read(sid uint32) Sector {
-	pos := o.sector_pos(sid, o.Lssector)
-	return Sector(o.bts[pos : pos+o.Lssector])
+func (o *Ole) short_sector_read(sid uint32) (Sector, error) {
+	return o.sector_read_internal(sid, o.Lssector)
+}
+
+func (o *Ole) sector_read_internal(sid, size uint32) (Sector, error) {
+	pos := o.sector_pos(sid, size)
+	if _, err := o.reader.Seek(int64(pos), 0); err == nil {
+		var bts = make([]byte, size)
+		o.reader.Read(bts)
+		return Sector(bts), nil
+	} else {
+		return nil, err
+	}
 }
 
 func (o *Ole) sector_pos(sid uint32, size uint32) uint32 {
