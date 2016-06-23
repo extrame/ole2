@@ -31,7 +31,15 @@ func (r *StreamReader) Read(p []byte) (n int, err error) {
 		} else {
 			readed += uint32(n)
 			r.offset_in_sector = 0
-			r.offset_of_sector = r.sat[r.offset_of_sector]
+			if r.offset_of_sector >= uint32(len(r.sat)) {
+				log.Fatal(`
+				THIS SHOULD NOT HAPPEN, IF YOUR PROGRAM BREAK, 
+				COMMENT THIS LINE TO CONTINUE AND MAIL ME XLS FILE 
+				TO TEST, THANKS`)
+				return int(readed), io.EOF
+			} else {
+				r.offset_of_sector = r.sat[r.offset_of_sector]
+			}
 			if r.offset_of_sector == ENDOFCHAIN {
 				return int(readed), io.EOF
 			}
