@@ -10,23 +10,24 @@ var DEBUG = false
 type StreamReader struct {
 	sat              []uint32
 	start            uint32
-	ole              *Ole
+	reader           io.ReadSeeker
 	offset_of_sector uint32
 	offset_in_sector uint32
 	size_sector      uint32
 	size             int64
 	offset           int64
+	sector_pos       func(uint32, uint32) uint32
 }
 
 func (r *StreamReader) Read(p []byte) (n int, err error) {
 	if r.offset_of_sector == ENDOFCHAIN {
 		return 0, io.EOF
 	}
-	pos := r.ole.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
-	r.ole.reader.Seek(int64(pos), 0)
+	pos := r.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
+	r.reader.Seek(int64(pos), 0)
 	readed := uint32(0)
 	for remainLen := uint32(len(p)) - readed; remainLen > r.size_sector-r.offset_in_sector; remainLen = uint32(len(p)) - readed {
-		if n, err := r.ole.reader.Read(p[readed : readed+r.size_sector-r.offset_in_sector]); err != nil {
+		if n, err := r.reader.Read(p[readed : readed+r.size_sector-r.offset_in_sector]); err != nil {
 			return int(readed) + n, err
 		} else {
 			readed += uint32(n)
@@ -43,11 +44,11 @@ func (r *StreamReader) Read(p []byte) (n int, err error) {
 			if r.offset_of_sector == ENDOFCHAIN {
 				return int(readed), io.EOF
 			}
-			pos := r.ole.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
-			r.ole.reader.Seek(int64(pos), 0)
+			pos := r.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
+			r.reader.Seek(int64(pos), 0)
 		}
 	}
-	if n, err := r.ole.reader.Read(p[readed:len(p)]); err == nil {
+	if n, err := r.reader.Read(p[readed:len(p)]); err == nil {
 		r.offset_in_sector += uint32(n)
 		if DEBUG {
 			log.Printf("pos:%x,bit:% X", r.offset_of_sector, p)

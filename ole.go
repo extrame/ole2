@@ -54,9 +54,9 @@ func (o *Ole) ListDir() (dir []*File, err error) {
 	return
 }
 
-func (o *Ole) OpenFile(file *File) io.ReadSeeker {
+func (o *Ole) OpenFile(file *File, root *File) io.ReadSeeker {
 	if file.Size < o.header.Sectorcutoff {
-		return o.short_stream_read(file.Sstart, file.Size)
+		return o.short_stream_read(file.Sstart, file.Size, root.Sstart)
 	} else {
 		return o.stream_read(file.Sstart, file.Size)
 	}
@@ -120,11 +120,12 @@ func (o *Ole) readMSAT() error {
 }
 
 func (o *Ole) stream_read(sid uint32, size uint32) *StreamReader {
-	return &StreamReader{o.SecID, sid, o, sid, 0, o.Lsector, int64(size), 0}
+	return &StreamReader{o.SecID, sid, o.reader, sid, 0, o.Lsector, int64(size), 0, sector_pos}
 }
 
-func (o *Ole) short_stream_read(sid uint32, size uint32) *StreamReader {
-	return &StreamReader{o.SSecID, sid, o, sid, 0, o.Lssector, int64(size), 0}
+func (o *Ole) short_stream_read(sid uint32, size uint32, startSecId uint32) *StreamReader {
+	ssatReader := &StreamReader{o.SecID, startSecId, o.reader, sid, 0, o.Lsector, int64(uint32(len(o.SSecID)) * o.Lssector), 0, sector_pos}
+	return &StreamReader{o.SSecID, sid, ssatReader, sid, 0, o.Lssector, int64(size), 0, short_sector_pos}
 }
 
 func (o *Ole) sector_read(sid uint32) (Sector, error) {
@@ -136,7 +137,7 @@ func (o *Ole) short_sector_read(sid uint32) (Sector, error) {
 }
 
 func (o *Ole) sector_read_internal(sid, size uint32) (Sector, error) {
-	pos := o.sector_pos(sid, size)
+	pos := sector_pos(sid, size)
 	if _, err := o.reader.Seek(int64(pos), 0); err == nil {
 		var bts = make([]byte, size)
 		o.reader.Read(bts)
@@ -146,6 +147,10 @@ func (o *Ole) sector_read_internal(sid, size uint32) (Sector, error) {
 	}
 }
 
-func (o *Ole) sector_pos(sid uint32, size uint32) uint32 {
+func sector_pos(sid uint32, size uint32) uint32 {
 	return 512 + sid*size
+}
+
+func short_sector_pos(sid uint32, size uint32) uint32 {
+	return sid * size
 }
