@@ -80,7 +80,7 @@ func (o *Ole) readMSAT() error {
 		}
 	}
 
-	for sid := o.header.Difstart; sid != ENDOFCHAIN; {
+	for sid := o.header.Difstart; sid != ENDOFCHAIN && sid != FREESECT; { // FREESECT only here due to an actual file that requires it (old Apple Numbers bug)
 		if sector, err := o.sector_read(sid); err == nil {
 			sids := sector.MsatValues(o.Lsector)
 
