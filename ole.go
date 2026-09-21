@@ -140,7 +140,9 @@ func (o *Ole) sector_read_internal(sid, size uint32) (Sector, error) {
 	pos := sector_pos(sid, size)
 	if _, err := o.reader.Seek(int64(pos), 0); err == nil {
 		var bts = make([]byte, size)
-		o.reader.Read(bts)
+		if _, err := o.reader.Read(bts); err != nil {
+		return nil, err
+	}
 		return Sector(bts), nil
 	} else {
 		return nil, err
