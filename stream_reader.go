@@ -1,11 +1,16 @@
 package ole2
 
 import (
+	"errors"
 	"io"
 	"log"
 )
 
 var DEBUG = false
+
+// ErrCorruptChain is returned when a sector chain is cyclic or points outside
+// the allocation table, which only happens in a damaged file.
+var ErrCorruptChain = errors.New("ole2: corrupt sector chain")
 
 type StreamReader struct {
 	sat              []uint32
@@ -17,12 +22,37 @@ type StreamReader struct {
 	size             int64
 	offset           int64
 	sector_pos       func(uint32, uint32) uint32
+	chain_steps      int // sectors followed in the current Read/Seek, bounds cyclic chains
+}
+
+// follow moves to the next sector of the chain, failing instead of looping
+// forever or indexing outside the allocation table.
+func (r *StreamReader) follow() error {
+	r.chain_steps++
+	if r.chain_steps > len(r.sat)+1 || r.offset_of_sector >= uint32(len(r.sat)) {
+		return ErrCorruptChain
+	}
+	r.offset_of_sector = r.sat[r.offset_of_sector]
+	return nil
 }
 
 func (r *StreamReader) Read(p []byte) (n int, err error) {
+	r.chain_steps = 0
 	if r.offset_of_sector == ENDOFCHAIN {
 		return 0, io.EOF
 	}
+	// A stream with a known size never yields more than that many bytes; this
+	// also stops a cyclic chain from feeding the caller data forever.
+	if r.size > 0 {
+		remaining := r.size - r.offset
+		if remaining <= 0 {
+			return 0, io.EOF
+		}
+		if int64(len(p)) > remaining {
+			p = p[:remaining]
+		}
+	}
+	defer func() { r.offset += int64(n) }()
 	pos := r.sector_pos(r.offset_of_sector, r.size_sector) + r.offset_in_sector
 	r.reader.Seek(int64(pos), 0)
 	readed := uint32(0)
@@ -32,14 +62,8 @@ func (r *StreamReader) Read(p []byte) (n int, err error) {
 		} else {
 			readed += uint32(n)
 			r.offset_in_sector = 0
-			if r.offset_of_sector >= uint32(len(r.sat)) {
-				log.Fatal(`
-				THIS SHOULD NOT HAPPEN, IF YOUR PROGRAM BREAK, 
-				COMMENT THIS LINE TO CONTINUE AND MAIL ME XLS FILE 
-				TO TEST, THANKS`)
-				return int(readed), io.EOF
-			} else {
-				r.offset_of_sector = r.sat[r.offset_of_sector]
+			if err := r.follow(); err != nil {
+				return int(readed), err
 			}
 			if r.offset_of_sector == ENDOFCHAIN {
 				return int(readed), io.EOF
@@ -61,6 +85,7 @@ func (r *StreamReader) Read(p []byte) (n int, err error) {
 }
 
 func (r *StreamReader) Seek(offset int64, whence int) (offset_result int64, err error) {
+	r.chain_steps = 0
 
 	if whence == 0 {
 		r.offset_of_sector = r.start
@@ -75,7 +100,9 @@ func (r *StreamReader) Seek(offset int64, whence int) (offset_result int64, err 
 	}
 
 	for offset >= int64(r.size_sector-r.offset_in_sector) {
-		r.offset_of_sector = r.sat[r.offset_of_sector]
+		if err = r.follow(); err != nil {
+			return r.offset, err
+		}
 		offset -= int64(r.size_sector - r.offset_in_sector)
 		r.offset_in_sector = 0
 		if r.offset_of_sector == ENDOFCHAIN {

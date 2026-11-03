@@ -80,7 +80,12 @@ func (o *Ole) readMSAT() error {
 		}
 	}
 
+	visited := map[uint32]bool{}
 	for sid := o.header.Difstart; sid != ENDOFCHAIN; {
+		if visited[sid] {
+			return ErrCorruptChain
+		}
+		visited[sid] = true
 		if sector, err := o.sector_read(sid); err == nil {
 			sids := sector.MsatValues(o.Lsector)
 
@@ -120,12 +125,12 @@ func (o *Ole) readMSAT() error {
 }
 
 func (o *Ole) stream_read(sid uint32, size uint32) *StreamReader {
-	return &StreamReader{o.SecID, sid, o.reader, sid, 0, o.Lsector, int64(size), 0, sector_pos}
+	return &StreamReader{o.SecID, sid, o.reader, sid, 0, o.Lsector, int64(size), 0, sector_pos, 0}
 }
 
 func (o *Ole) short_stream_read(sid uint32, size uint32, startSecId uint32) *StreamReader {
-	ssatReader := &StreamReader{o.SecID, startSecId, o.reader, sid, 0, o.Lsector, int64(uint32(len(o.SSecID)) * o.Lssector), 0, sector_pos}
-	return &StreamReader{o.SSecID, sid, ssatReader, sid, 0, o.Lssector, int64(size), 0, short_sector_pos}
+	ssatReader := &StreamReader{o.SecID, startSecId, o.reader, sid, 0, o.Lsector, int64(uint32(len(o.SSecID)) * o.Lssector), 0, sector_pos, 0}
+	return &StreamReader{o.SSecID, sid, ssatReader, sid, 0, o.Lssector, int64(size), 0, short_sector_pos, 0}
 }
 
 func (o *Ole) sector_read(sid uint32) (Sector, error) {
